@@ -33,6 +33,13 @@ class AppState {
 	view = $state<View>('annotate');
 	/** Text edit mode vs. read/annotate mode for the active document. */
 	editingText = $state(false);
+	/**
+	 * In-progress edit buffer. While editing, keystrokes only update this draft
+	 * (no re-anchoring, no file writes) so typing stays fluid. Changes are
+	 * applied to the document and written to disk on demand via `commitDraft()`.
+	 * `null` means "not currently editing / no pending draft".
+	 */
+	draft = $state<string | null>(null);
 	/** The code currently selected for assigning to a new passage. */
 	activeCodePath = $state<string | null>(null);
 	/** Code path used to filter the cluster view (null = show all). */
@@ -55,6 +62,11 @@ class AppState {
 		return this.activeIndex >= 0 && this.activeIndex < this.docs.length
 			? this.docs[this.activeIndex]
 			: null;
+	}
+
+	/** True when the edit buffer differs from the saved document body. */
+	get isDirty(): boolean {
+		return this.draft !== null && !!this.activeDoc && this.draft !== this.activeDoc.body;
 	}
 
 	/** Restore the last opened folder from localStorage (call on mount). */
@@ -101,11 +113,58 @@ class AppState {
 
 	openDoc(index: number) {
 		if (index < 0 || index >= this.docs.length) return;
+		if (index === this.activeIndex) return;
+		// Persist any pending edits before leaving the current document.
+		if (this.isDirty) this.commitDraft();
 		this.activeIndex = index;
 		this.selectedAnnotationId = null;
 		this.rerangeAnnotationId = null;
 		this.editingText = false;
+		this.draft = null;
 		this.view = 'annotate';
+	}
+
+	// --- Text editing ------------------------------------------------------
+
+	/** Enter text-edit mode, seeding the draft from the current body. */
+	startEditing() {
+		if (!this.activeDoc) return;
+		this.draft = this.activeDoc.body;
+		this.editingText = true;
+	}
+
+	/** Update the local edit buffer. Does NOT touch annotations or the file. */
+	updateDraft(text: string) {
+		this.draft = text;
+	}
+
+	/**
+	 * Apply the buffered edits: re-anchor all annotations against the new text
+	 * (handling changes at several places at once) and write the file once.
+	 */
+	commitDraft() {
+		const doc = this.activeDoc;
+		if (!doc || this.draft === null) return;
+		if (this.draft !== doc.body) {
+			doc.annotations = adjustAnnotations(doc.body, this.draft, [...doc.annotations]);
+			doc.body = this.draft;
+			void this.saveActiveDoc();
+		}
+		// Draft now matches the saved body -> clean, but stay in edit mode.
+		this.draft = doc.body;
+	}
+
+	/** Throw away buffered edits and leave text-edit mode. */
+	discardDraft() {
+		this.draft = null;
+		this.editingText = false;
+	}
+
+	/** Leave edit mode, committing any pending changes first. */
+	stopEditing() {
+		if (this.isDirty) this.commitDraft();
+		this.draft = null;
+		this.editingText = false;
 	}
 
 	// --- Annotations -------------------------------------------------------
@@ -164,15 +223,6 @@ class AppState {
 		}
 	}
 
-	/** Apply an edited transcript body, keeping annotation offsets consistent. */
-	setBody(newBody: string) {
-		const doc = this.activeDoc;
-		if (!doc || doc.body === newBody) return;
-		doc.annotations = adjustAnnotations(doc.body, newBody, [...doc.annotations]);
-		doc.body = newBody;
-		this.scheduleDocSave();
-	}
-
 	// --- Persistence -------------------------------------------------------
 
 	scheduleDocSave() {
@@ -184,6 +234,7 @@ class AppState {
 	async saveActiveDoc() {
 		const doc = this.activeDoc;
 		if (!doc) return;
+		this.saveStatus = 'saving';
 		try {
 			const res = await fetch('/api/doc', {
 				method: 'PUT',

@@ -76,20 +76,37 @@
 				{:else if app.activeDoc}
 					<div class="doc-head">
 						<h1>{app.activeDoc.title ?? app.activeDoc.name}</h1>
-						<div class="modes">
-							<button class:active={!app.editingText} onclick={() => (app.editingText = false)}
-								>Lesen / Annotieren</button
-							>
-							<button class:active={app.editingText} onclick={() => (app.editingText = true)}
-								>Text bearbeiten</button
-							>
-						</div>
+						{#if app.editingText}
+							<div class="modes">
+								{#if app.isDirty}
+									<span class="dirty">Ungespeicherte Änderungen</span>
+								{/if}
+								<button class="primary" disabled={!app.isDirty} onclick={() => app.commitDraft()}
+									>Sichern</button
+								>
+								<button onclick={() => app.discardDraft()}>Verwerfen</button>
+								<button onclick={() => app.stopEditing()}>Fertig</button>
+							</div>
+						{:else}
+							<div class="modes">
+								<button class="active" disabled>Lesen / Annotieren</button>
+								<button onclick={() => app.startEditing()}>Text bearbeiten</button>
+							</div>
+						{/if}
 					</div>
 					{#if app.editingText}
+						<!-- Local draft only: typing never writes to disk. Annotations are
+						     re-anchored and the file is written on "Sichern". -->
 						<textarea
 							class="editor"
-							value={app.activeDoc.body}
-							oninput={(e) => app.setBody(e.currentTarget.value)}
+							value={app.draft ?? app.activeDoc.body}
+							oninput={(e) => app.updateDraft(e.currentTarget.value)}
+							onkeydown={(e) => {
+								if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+									e.preventDefault();
+									app.commitDraft();
+								}
+							}}
 							spellcheck="false"></textarea>
 					{:else}
 						<Annotator />
@@ -229,8 +246,24 @@
 	}
 	.modes {
 		display: flex;
+		align-items: center;
 		gap: 0.3rem;
 		flex: none;
+	}
+	.modes button.primary {
+		background: #111827;
+		color: white;
+		border-color: #111827;
+	}
+	.modes button:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.dirty {
+		font-size: 0.75rem;
+		color: #b45309;
+		margin-right: 0.35rem;
+		white-space: nowrap;
 	}
 	.editor {
 		flex: 1;
