@@ -1,0 +1,22 @@
+# Qualda codebook - the predefined set of codes.
+# Only codes listed here can be assigned to passages.
+# `children` are subcodes. `color` is optional (inherited from parent).
+
+codes:
+  - id: emotion
+    label: Emotion
+    color: "#e11d48"
+    description: Gefühlsäußerungen der befragten Person
+    children:
+      - id: anger
+        label: Wut
+      - id: joy
+        label: Freude
+  - id: theme
+    label: Thema
+    color: "#2563eb"
+    children:
+      - id: trust
+        label: Vertrauen
+      - id: workload
+        label: Arbeitsbelastung
