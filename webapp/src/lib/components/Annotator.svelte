@@ -86,6 +86,15 @@
 		const start = Math.min(a, b);
 		const end = Math.max(a, b);
 		if (end <= start) return;
+
+		// Re-range mode: redefine the selected annotation's boundaries.
+		if (app.rerangeAnnotationId) {
+			app.updateAnnotationRange(app.rerangeAnnotationId, start, end);
+			app.rerangeAnnotationId = null;
+			window.getSelection()?.removeAllRanges();
+			return;
+		}
+
 		pending = { start, end };
 		const rect = range.getBoundingClientRect();
 		menuX = rect.left;
@@ -116,7 +125,10 @@
 
 	$effect(() => {
 		function onKey(e: KeyboardEvent) {
-			if (e.key === 'Escape') closeMenu();
+			if (e.key === 'Escape') {
+				closeMenu();
+				app.rerangeAnnotationId = null;
+			}
 		}
 		window.addEventListener('keydown', onKey);
 		return () => window.removeEventListener('keydown', onKey);
@@ -124,6 +136,12 @@
 </script>
 
 <div class="annotator">
+	{#if app.rerangeAnnotationId}
+		<div class="reranging">
+			<span>Markiere den neuen Textbereich für diese Annotation.</span>
+			<button type="button" onclick={() => (app.rerangeAnnotationId = null)}>Abbrechen</button>
+		</div>
+	{/if}
 	{#if !doc}
 		<p class="empty">Kein Dokument geöffnet.</p>
 	{:else if doc.body.trim() === ''}
@@ -186,6 +204,35 @@
 	.annotator {
 		height: 100%;
 		overflow: auto;
+	}
+	.reranging {
+		position: sticky;
+		top: 0;
+		z-index: 10;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		color: #1e3a8a;
+		border-radius: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		margin: 0.5rem 0.25rem;
+		font-size: 0.85rem;
+	}
+	.reranging button {
+		flex: none;
+		border: 1px solid #bfdbfe;
+		background: white;
+		color: #1e3a8a;
+		border-radius: 0.375rem;
+		padding: 0.25rem 0.6rem;
+		font-size: 0.8rem;
+		cursor: pointer;
+	}
+	.reranging button:hover {
+		background: #dbeafe;
 	}
 	.text {
 		white-space: pre-wrap;

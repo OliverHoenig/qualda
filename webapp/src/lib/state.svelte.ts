@@ -39,6 +39,8 @@ class AppState {
 	clusterCodePath = $state<string | null>(null);
 	/** Currently focused annotation (for the inspector / editing). */
 	selectedAnnotationId = $state<string | null>(null);
+	/** Annotation whose text range is being redefined via a new selection. */
+	rerangeAnnotationId = $state<string | null>(null);
 
 	saveStatus = $state<SaveStatus>('idle');
 	codebookStatus = $state<SaveStatus>('idle');
@@ -86,6 +88,7 @@ class AppState {
 			this.docs = data.docs ?? [];
 			this.activeIndex = this.docs.length > 0 ? 0 : -1;
 			this.selectedAnnotationId = null;
+			this.rerangeAnnotationId = null;
 			if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, data.folder);
 		} catch (e) {
 			this.errorMsg = e instanceof Error ? e.message : 'Unbekannter Fehler';
@@ -100,6 +103,7 @@ class AppState {
 		if (index < 0 || index >= this.docs.length) return;
 		this.activeIndex = index;
 		this.selectedAnnotationId = null;
+		this.rerangeAnnotationId = null;
 		this.editingText = false;
 		this.view = 'annotate';
 	}
@@ -132,6 +136,22 @@ class AppState {
 		}
 	}
 
+	/** Redefine the start/end of an annotation, keeping the quote in sync. */
+	updateAnnotationRange(id: string, start: number, end: number) {
+		const doc = this.activeDoc;
+		if (!doc || end <= start) return;
+		const clampedStart = Math.max(0, Math.min(start, doc.body.length));
+		const clampedEnd = Math.max(0, Math.min(end, doc.body.length));
+		if (clampedEnd <= clampedStart) return;
+		const a = doc.annotations.find((x) => x.id === id);
+		if (a) {
+			a.start = clampedStart;
+			a.end = clampedEnd;
+			a.quote = doc.body.slice(clampedStart, clampedEnd);
+			this.scheduleDocSave();
+		}
+	}
+
 	deleteAnnotation(id: string) {
 		const doc = this.activeDoc;
 		if (!doc) return;
@@ -139,6 +159,7 @@ class AppState {
 		if (idx !== -1) {
 			doc.annotations.splice(idx, 1);
 			if (this.selectedAnnotationId === id) this.selectedAnnotationId = null;
+			if (this.rerangeAnnotationId === id) this.rerangeAnnotationId = null;
 			this.scheduleDocSave();
 		}
 	}

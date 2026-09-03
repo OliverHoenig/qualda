@@ -36,6 +36,17 @@
 							{/if}
 						</select>
 						<button
+							class="range"
+							class:active={app.rerangeAnnotationId === a.id}
+							title="Bereich ändern – danach neuen Text markieren"
+							onclick={(e) => {
+								e.stopPropagation();
+								app.selectedAnnotationId = a.id;
+								app.rerangeAnnotationId = app.rerangeAnnotationId === a.id ? null : a.id;
+							}}
+							aria-label="Bereich ändern">↔</button
+						>
+						<button
 							class="del"
 							title="Löschen"
 							onclick={(e) => {
@@ -44,6 +55,9 @@
 							}}>×</button
 						>
 					</div>
+					{#if app.rerangeAnnotationId === a.id}
+						<p class="range-hint">Markiere den neuen Textbereich im Dokument.</p>
+					{/if}
 					<p class="quote">{a.quote}</p>
 				</li>
 			{/each}
@@ -109,6 +123,21 @@
 		border: 1px solid #e5e7eb;
 		border-radius: 0.25rem;
 	}
+	.range {
+		border: none;
+		background: transparent;
+		font-size: 1rem;
+		line-height: 1;
+		color: #9ca3af;
+		cursor: pointer;
+		flex: none;
+	}
+	.range:hover {
+		color: #1d4ed8;
+	}
+	.range.active {
+		color: #1d4ed8;
+	}
 	.del {
 		border: none;
 		background: transparent;
@@ -116,9 +145,15 @@
 		line-height: 1;
 		color: #9ca3af;
 		cursor: pointer;
+		flex: none;
 	}
 	.del:hover {
 		color: #b91c1c;
+	}
+	.range-hint {
+		margin: 0.35rem 0 0;
+		font-size: 0.75rem;
+		color: #1d4ed8;
 	}
 	.quote {
 		margin: 0.35rem 0 0;

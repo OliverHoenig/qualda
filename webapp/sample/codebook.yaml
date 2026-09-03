@@ -10,6 +10,7 @@ codes:
     children:
       - id: anger
         label: Wut
+        color: "#e11d48"
       - id: joy
         label: Freude
   - id: theme
