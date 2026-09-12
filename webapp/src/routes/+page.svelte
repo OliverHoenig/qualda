@@ -40,10 +40,10 @@
 		</form>
 
 		<div class="views">
-			<button class:active={app.view === 'annotate'} onclick={() => (app.view = 'annotate')}
+			<button class:active={app.view === 'annotate'} onclick={() => app.setView('annotate')}
 				>Annotieren</button
 			>
-			<button class:active={app.view === 'cluster'} onclick={() => (app.view = 'cluster')}
+			<button class:active={app.view === 'cluster'} onclick={() => app.setView('cluster')}
 				>Cluster</button
 			>
 		</div>
@@ -76,41 +76,19 @@
 				{:else if app.activeDoc}
 					<div class="doc-head">
 						<h1>{app.activeDoc.title ?? app.activeDoc.name}</h1>
-						{#if app.editingText}
-							<div class="modes">
-								{#if app.isDirty}
-									<span class="dirty">Ungespeicherte Änderungen</span>
-								{/if}
-								<button class="primary" disabled={!app.isDirty} onclick={() => app.commitDraft()}
-									>Sichern</button
-								>
+						<div class="modes">
+							{#if app.isDirty}
+								<span class="dirty">Ungespeicherte Änderungen</span>
+								<button class="primary" onclick={() => app.commitDraft()}>Sichern</button>
 								<button onclick={() => app.discardDraft()}>Verwerfen</button>
-								<button onclick={() => app.stopEditing()}>Fertig</button>
-							</div>
-						{:else}
-							<div class="modes">
-								<button class="active" disabled>Lesen / Annotieren</button>
-								<button onclick={() => app.startEditing()}>Text bearbeiten</button>
-							</div>
-						{/if}
+							{:else}
+								<span class="hint">Tippen zum Bearbeiten · Markieren zum Annotieren</span>
+							{/if}
+						</div>
 					</div>
-					{#if app.editingText}
-						<!-- Local draft only: typing never writes to disk. Annotations are
-						     re-anchored and the file is written on "Sichern". -->
-						<textarea
-							class="editor"
-							value={app.draft ?? app.activeDoc.body}
-							oninput={(e) => app.updateDraft(e.currentTarget.value)}
-							onkeydown={(e) => {
-								if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-									e.preventDefault();
-									app.commitDraft();
-								}
-							}}
-							spellcheck="false"></textarea>
-					{:else}
+					{#key app.activeDoc.path}
 						<Annotator />
-					{/if}
+					{/key}
 				{:else}
 					<p class="empty">Wähle links ein Dokument.</p>
 				{/if}
@@ -174,8 +152,7 @@
 		display: flex;
 		gap: 0.3rem;
 	}
-	.views button.active,
-	.modes button.active {
+	.views button.active {
 		background: #111827;
 		color: white;
 		border-color: #111827;
@@ -265,17 +242,10 @@
 		margin-right: 0.35rem;
 		white-space: nowrap;
 	}
-	.editor {
-		flex: 1;
-		width: 100%;
-		margin: 0.75rem 0 1rem;
-		padding: 0.75rem;
-		border: 1px solid #e5e7eb;
-		border-radius: 0.5rem;
-		font-family: ui-monospace, monospace;
-		font-size: 0.9rem;
-		line-height: 1.6;
-		resize: none;
+	.hint {
+		font-size: 0.75rem;
+		color: #6b7280;
+		white-space: nowrap;
 	}
 	.right {
 		border-left: 1px solid #e5e7eb;

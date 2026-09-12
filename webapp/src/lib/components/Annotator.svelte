@@ -3,7 +3,8 @@
 	import { buildSegments, type Segment } from '$lib/format/segments';
 	import type { Annotation } from '$lib/types';
 
-	let container = $state<HTMLDivElement | null>(null);
+	let highlightsEl: HTMLDivElement | null = null;
+	let textareaEl: HTMLTextAreaElement | null = null;
 
 	// Floating code picker shown after a text selection.
 	let menuOpen = $state(false);
@@ -12,8 +13,7 @@
 	let query = $state('');
 	let pending = $state<{ start: number; end: number } | null>(null);
 
-	const doc = $derived(app.activeDoc);
-	const segments = $derived(doc ? buildSegments(doc.body, doc.annotations) : []);
+	const segments = $derived(buildSegments(app.displayBody, app.displayAnnotations));
 
 	const filteredCodes = $derived(
 		app.flatCodes.filter(
@@ -25,9 +25,8 @@
 	);
 
 	function annotationsForSegment(seg: Segment): Annotation[] {
-		if (!doc) return [];
 		return seg.annotationIds
-			.map((id) => doc.annotations.find((a) => a.id === id))
+			.map((id) => app.displayAnnotations.find((a) => a.id === id))
 			.filter((a): a is Annotation => !!a);
 	}
 
@@ -57,57 +56,82 @@
 		return !!app.selectedAnnotationId && seg.annotationIds.includes(app.selectedAnnotationId);
 	}
 
-	function globalOffset(node: Node, offset: number): number {
-		if (node.nodeType === Node.TEXT_NODE) {
-			const span = (node.parentElement as HTMLElement | null)?.closest<HTMLElement>('[data-start]');
-			if (!span) return -1;
-			return Number(span.dataset.start) + offset;
-		}
-		const el = node as HTMLElement;
-		if (el.dataset?.start !== undefined) return Number(el.dataset.start);
-		const child = el.childNodes[offset] as HTMLElement | undefined;
-		if (child?.dataset?.start !== undefined) return Number(child.dataset.start);
-		const prev = el.childNodes[offset - 1] as HTMLElement | undefined;
-		if (prev?.dataset?.start !== undefined)
-			return Number(prev.dataset.start) + (prev.textContent?.length ?? 0);
-		return -1;
+	function syncScroll() {
+		if (!highlightsEl || !textareaEl) return;
+		highlightsEl.scrollTop = textareaEl.scrollTop;
+		highlightsEl.scrollLeft = textareaEl.scrollLeft;
 	}
 
-	function onMouseUp() {
-		const sel = window.getSelection();
-		if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !container || !doc) {
+	function selectAnnotationAt(offset: number) {
+		const hits = app.displayAnnotations.filter((a) => a.start <= offset && offset < a.end);
+		if (hits.length === 0) return;
+		const innermost = [...hits].sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+		app.selectedAnnotationId = innermost.id;
+	}
+
+	function placeMenu(clientX: number, clientY: number) {
+		const pad = 8;
+		const width = 320;
+		const height = 320;
+		menuX = Math.min(clientX, window.innerWidth - width - pad);
+		menuY = Math.min(clientY + 4, window.innerHeight - height - pad);
+	}
+
+	function handleSelection(ta: HTMLTextAreaElement, clientX: number, clientY: number) {
+		const start = ta.selectionStart;
+		const end = ta.selectionEnd;
+		if (end <= start) {
+			selectAnnotationAt(start);
 			return;
 		}
-		const range = sel.getRangeAt(0);
-		if (!container.contains(range.commonAncestorContainer)) return;
-		const a = globalOffset(range.startContainer, range.startOffset);
-		const b = globalOffset(range.endContainer, range.endOffset);
-		if (a < 0 || b < 0) return;
-		const start = Math.min(a, b);
-		const end = Math.max(a, b);
-		if (end <= start) return;
 
-		// Re-range mode: redefine the selected annotation's boundaries.
 		if (app.rerangeAnnotationId) {
 			app.updateAnnotationRange(app.rerangeAnnotationId, start, end);
 			app.rerangeAnnotationId = null;
-			window.getSelection()?.removeAllRanges();
+			ta.setSelectionRange(end, end);
 			return;
 		}
 
 		pending = { start, end };
-		const rect = range.getBoundingClientRect();
-		menuX = rect.left;
-		menuY = rect.bottom + 4;
+		placeMenu(clientX, clientY);
 		query = '';
 		menuOpen = true;
+	}
+
+	function onMouseUp(e: MouseEvent) {
+		handleSelection(e.currentTarget as HTMLTextAreaElement, e.clientX, e.clientY);
+	}
+
+	function attachHighlights(el: HTMLDivElement) {
+		highlightsEl = el;
+		return () => {
+			highlightsEl = null;
+		};
+	}
+
+	function attachInput(el: HTMLTextAreaElement) {
+		textareaEl = el;
+		const onScroll = () => syncScroll();
+		el.addEventListener('scroll', onScroll);
+		$effect(() => {
+			void app.displayBody;
+			void segments;
+			if (highlightsEl) {
+				highlightsEl.scrollTop = el.scrollTop;
+				highlightsEl.scrollLeft = el.scrollLeft;
+			}
+		});
+		return () => {
+			el.removeEventListener('scroll', onScroll);
+			textareaEl = null;
+		};
 	}
 
 	function assign(codePath: string) {
 		if (!pending) return;
 		app.addAnnotation(codePath, pending.start, pending.end);
 		closeMenu();
-		window.getSelection()?.removeAllRanges();
+		textareaEl?.focus();
 	}
 
 	function closeMenu() {
@@ -115,25 +139,20 @@
 		pending = null;
 	}
 
-	function onSegmentClick(seg: Segment) {
-		const anns = annotationsForSegment(seg);
-		if (anns.length === 0) return;
-		// Focus the innermost annotation for the inspector.
-		const innermost = [...anns].sort((a, b) => a.end - a.start - (b.end - b.start))[0];
-		app.selectedAnnotationId = innermost.id;
-	}
-
-	$effect(() => {
-		function onKey(e: KeyboardEvent) {
-			if (e.key === 'Escape') {
-				closeMenu();
-				app.rerangeAnnotationId = null;
-			}
+	function onWindowKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			closeMenu();
+			app.rerangeAnnotationId = null;
+			return;
 		}
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	});
+		if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+			e.preventDefault();
+			if (app.isDirty) app.commitDraft();
+		}
+	}
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div class="annotator">
 	{#if app.rerangeAnnotationId}
@@ -142,30 +161,28 @@
 			<button type="button" onclick={() => (app.rerangeAnnotationId = null)}>Abbrechen</button>
 		</div>
 	{/if}
-	{#if !doc}
-		<p class="empty">Kein Dokument geöffnet.</p>
-	{:else if doc.body.trim() === ''}
-		<p class="empty">Dieses Dokument ist leer.</p>
-	{:else}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div bind:this={container} class="text" onmouseup={onMouseUp}>
-			{#each segments as seg (seg.start + '-' + seg.end)}
-				{#if seg.annotationIds.length > 0}
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
-					<span
-						data-start={seg.start}
-						class="coded"
-						class:selected={isSelected(seg)}
-						style={segStyle(seg)}
-						title={segTitle(seg)}
-						onclick={() => onSegmentClick(seg)}>{seg.text}</span
-					>
-				{:else}
-					<span data-start={seg.start}>{seg.text}</span>
-				{/if}
-			{/each}
+	<div class="editor">
+		<div class="highlights" aria-hidden="true" {@attach attachHighlights}>
+			{#each segments as seg (`${seg.start}-${seg.end}-${seg.annotationIds.join(',')}`)}
+				<span
+					class={['hl', seg.annotationIds.length > 0 && 'coded', isSelected(seg) && 'selected']}
+					style={seg.annotationIds.length > 0 ? segStyle(seg) : undefined}
+					title={seg.annotationIds.length > 0 ? segTitle(seg) : undefined}>{seg.text}</span
+				>
+			{/each}{#if app.displayBody.endsWith('\n')}<span class="hl"> </span>{/if}
 		</div>
-	{/if}
+		<textarea
+			class="input"
+			{@attach attachInput}
+			bind:value={() => app.displayBody, (v) => app.updateDraft(v)}
+			onmouseup={onMouseUp}
+			spellcheck="false"
+			autocomplete="off"
+			autocapitalize="off"
+			wrap="soft"
+			aria-label="Transkript bearbeiten und annotieren"
+		></textarea>
+	</div>
 </div>
 
 {#if menuOpen}
@@ -202,12 +219,13 @@
 
 <style>
 	.annotator {
-		height: 100%;
-		overflow: auto;
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
 	}
 	.reranging {
-		position: sticky;
-		top: 0;
+		flex: none;
 		z-index: 10;
 		display: flex;
 		align-items: center;
@@ -218,7 +236,7 @@
 		color: #1e3a8a;
 		border-radius: 0.5rem;
 		padding: 0.5rem 0.75rem;
-		margin: 0.5rem 0.25rem;
+		margin: 0.5rem 0 0;
 		font-size: 0.85rem;
 	}
 	.reranging button {
@@ -234,28 +252,68 @@
 	.reranging button:hover {
 		background: #dbeafe;
 	}
-	.text {
+	.editor {
+		position: relative;
+		flex: 1;
+		min-height: 0;
+		margin: 0.75rem 0 1rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 0.5rem;
+		background: #fff;
+	}
+	.highlights,
+	.input {
+		position: absolute;
+		inset: 0;
+		box-sizing: border-box;
+		margin: 0;
+		padding: 0.75rem;
+		border: none;
+		border-radius: 0.5rem;
+		font: 400 0.98rem/2.1 ui-serif, Georgia, 'Times New Roman', serif;
+		letter-spacing: normal;
+		word-spacing: normal;
+		text-transform: none;
 		white-space: pre-wrap;
+		overflow-wrap: break-word;
 		word-break: break-word;
-		line-height: 2.1;
-		font-size: 0.98rem;
-		padding: 0.5rem 0.25rem 3rem;
-		font-family: ui-serif, Georgia, 'Times New Roman', serif;
+		tab-size: 4;
+		overflow-x: hidden;
+		overflow-y: scroll;
+		appearance: none;
+	}
+	.highlights {
+		pointer-events: none;
 		color: #1f2937;
+		background: #fff;
+		z-index: 0;
+	}
+	.hl {
+		margin: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 2px;
 	}
 	.coded {
-		cursor: pointer;
 		border-radius: 2px;
-		padding-bottom: 1px;
 	}
 	.coded.selected {
 		outline: 2px solid #111827;
 		outline-offset: 1px;
 	}
-	.empty {
-		color: #9ca3af;
-		font-style: italic;
-		padding: 2rem 0.5rem;
+	.input {
+		z-index: 1;
+		color: transparent;
+		caret-color: #111827;
+		background: transparent;
+		resize: none;
+		outline: none;
+	}
+	.input:focus {
+		box-shadow: inset 0 0 0 1px #9ca3af;
+	}
+	.input::selection {
+		background: color-mix(in srgb, #93c5fd 45%, transparent);
 	}
 	.backdrop {
 		position: fixed;

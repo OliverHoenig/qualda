@@ -8,7 +8,7 @@ import {
 	updateCode
 } from '$lib/format/codebook';
 import type { CodeNode } from '$lib/types';
-import { adjustAnnotations } from '$lib/format/offsets';
+import { adjustAnnotations, projectAnnotations } from '$lib/format/offsets';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 type View = 'annotate' | 'cluster';
@@ -31,13 +31,12 @@ class AppState {
 	activeIndex = $state(-1);
 
 	view = $state<View>('annotate');
-	/** Text edit mode vs. read/annotate mode for the active document. */
-	editingText = $state(false);
 	/**
-	 * In-progress edit buffer. While editing, keystrokes only update this draft
-	 * (no re-anchoring, no file writes) so typing stays fluid. Changes are
-	 * applied to the document and written to disk on demand via `commitDraft()`.
-	 * `null` means "not currently editing / no pending draft".
+	 * In-progress edit buffer. Keystrokes only update this draft — stored
+	 * annotation offsets stay on the last saved body until `commitDraft()`,
+	 * so a discarded edit never shifts them. Highlights are projected onto
+	 * the draft via `displayAnnotations`. `null` means the editor matches
+	 * the saved body.
 	 */
 	draft = $state<string | null>(null);
 	/** The code currently selected for assigning to a new passage. */
@@ -63,6 +62,19 @@ class AppState {
 			? this.docs[this.activeIndex]
 			: null;
 	}
+
+	/** Text currently shown in the editor (draft if present, otherwise saved body). */
+	readonly displayBody: string = $derived(this.draft ?? this.activeDoc?.body ?? '');
+
+	/**
+	 * Annotations aligned to `displayBody`. Stored offsets are not mutated
+	 * while the draft is dirty; they are only projected for display.
+	 */
+	readonly displayAnnotations: Annotation[] = $derived.by(() => {
+		const doc = this.activeDoc;
+		if (!doc) return [];
+		return projectAnnotations(doc.body, this.displayBody, doc.annotations);
+	});
 
 	/** True when the edit buffer differs from the saved document body. */
 	get isDirty(): boolean {
@@ -99,6 +111,7 @@ class AppState {
 			this.codebook = data.codebook ?? { codes: [] };
 			this.docs = data.docs ?? [];
 			this.activeIndex = this.docs.length > 0 ? 0 : -1;
+			this.draft = null;
 			this.selectedAnnotationId = null;
 			this.rerangeAnnotationId = null;
 			if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, data.folder);
@@ -106,6 +119,7 @@ class AppState {
 			this.errorMsg = e instanceof Error ? e.message : 'Unbekannter Fehler';
 			this.docs = [];
 			this.activeIndex = -1;
+			this.draft = null;
 		} finally {
 			this.loading = false;
 		}
@@ -119,22 +133,22 @@ class AppState {
 		this.activeIndex = index;
 		this.selectedAnnotationId = null;
 		this.rerangeAnnotationId = null;
-		this.editingText = false;
 		this.draft = null;
 		this.view = 'annotate';
 	}
 
-	// --- Text editing ------------------------------------------------------
-
-	/** Enter text-edit mode, seeding the draft from the current body. */
-	startEditing() {
-		if (!this.activeDoc) return;
-		this.draft = this.activeDoc.body;
-		this.editingText = true;
+	setView(view: View) {
+		if (view === this.view) return;
+		if (this.isDirty) this.commitDraft();
+		this.view = view;
 	}
 
-	/** Update the local edit buffer. Does NOT touch annotations or the file. */
+	// --- Text editing ------------------------------------------------------
+
+	/** Update the local edit buffer. Does NOT touch stored annotations or the file. */
 	updateDraft(text: string) {
+		if (this.draft === text) return;
+		if (this.draft === null && this.activeDoc && text === this.activeDoc.body) return;
 		this.draft = text;
 	}
 
@@ -150,26 +164,26 @@ class AppState {
 			doc.body = this.draft;
 			void this.saveActiveDoc();
 		}
-		// Draft now matches the saved body -> clean, but stay in edit mode.
-		this.draft = doc.body;
+		this.draft = null;
 	}
 
-	/** Throw away buffered edits and leave text-edit mode. */
+	/** Throw away buffered edits. Stored annotation offsets are unchanged. */
 	discardDraft() {
 		this.draft = null;
-		this.editingText = false;
 	}
 
-	/** Leave edit mode, committing any pending changes first. */
-	stopEditing() {
+	/**
+	 * Persist pending text edits so annotation offsets can be written against
+	 * the current editor text. Called automatically before add / re-range.
+	 */
+	ensureCommitted() {
 		if (this.isDirty) this.commitDraft();
-		this.draft = null;
-		this.editingText = false;
 	}
 
 	// --- Annotations -------------------------------------------------------
 
 	addAnnotation(codePath: string, start: number, end: number) {
+		this.ensureCommitted();
 		const doc = this.activeDoc;
 		if (!doc || end <= start) return;
 		if (!this.codeIndex.has(codePath)) return; // only predefined codes
@@ -197,6 +211,7 @@ class AppState {
 
 	/** Redefine the start/end of an annotation, keeping the quote in sync. */
 	updateAnnotationRange(id: string, start: number, end: number) {
+		this.ensureCommitted();
 		const doc = this.activeDoc;
 		if (!doc || end <= start) return;
 		const clampedStart = Math.max(0, Math.min(start, doc.body.length));

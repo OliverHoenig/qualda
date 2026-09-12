@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { app } from '$lib/state.svelte';
 
-	const doc = $derived(app.activeDoc);
 	const sorted = $derived(
-		doc ? [...doc.annotations].sort((a, b) => a.start - b.start || a.end - b.end) : []
+		[...app.displayAnnotations].sort((a, b) => a.start - b.start || a.end - b.end)
 	);
 </script>
 

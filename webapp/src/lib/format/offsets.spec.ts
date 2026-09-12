@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { adjustAnnotations } from './offsets';
+import { adjustAnnotations, projectAnnotations } from './offsets';
 import type { Annotation } from '$lib/types';
 
 // Robustness of live re-anchoring while the transcript body is edited:
@@ -46,6 +46,22 @@ describe('adjustAnnotations robustness', () => {
 		const r = adjustAnnotations(body, nb, anns());
 		expect(nb.slice(r[1].start, r[1].end)).toBe('wütend.');
 		expect(r[0].quote).toBe(nb.slice(r[0].start, r[0].end));
+	});
+
+	it('projectAnnotations leaves stored offsets untouched when the draft matches', () => {
+		const original = anns();
+		const preview = projectAnnotations(body, body, original);
+		expect(preview).toBe(original);
+	});
+
+	it('projectAnnotations follows the draft without mutating saved offsets', () => {
+		const original = anns();
+		const snapshot = original.map((a) => ({ ...a }));
+		const nb = 'Vorwort. ' + body;
+		const preview = projectAnnotations(body, nb, original);
+		expect(original).toEqual(snapshot);
+		expect(nb.slice(preview[0].start, preview[0].end)).toBe('Am Anfang lief alles gut.');
+		expect(nb.slice(preview[1].start, preview[1].end)).toBe('wütend.');
 	});
 
 	it('detects SEVERAL edits at different places in one step (batched save)', () => {

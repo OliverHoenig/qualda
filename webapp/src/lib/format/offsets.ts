@@ -70,6 +70,22 @@ export function adjustAnnotations(
 	);
 }
 
+/**
+ * Annotations as they should appear for the text currently in the editor.
+ *
+ * Stored offsets stay on the last saved body while the user types (so a
+ * discarded draft never mutates them). This projects those offsets onto the
+ * draft so highlights follow the same passages instead of appearing to slip.
+ */
+export function projectAnnotations(
+	savedBody: string,
+	editorBody: string,
+	annotations: Annotation[]
+): Annotation[] {
+	if (editorBody === savedBody) return annotations;
+	return adjustAnnotations(savedBody, editorBody, annotations);
+}
+
 function clamp(n: number, max: number): number {
 	return Math.max(0, Math.min(n, max));
 }
